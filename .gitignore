@@ -1,0 +1,53 @@
+# ============================================
+# GITIGNORE — Redes Neuronales
+# ============================================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Entornos virtuales
+venv/
+env/
+.venv/
+.env
+
+# Jupyter / Notebooks
+.ipynb_checkpoints/
+*.ipynb_checkpoints/
+
+# Datos (grandes archivos)
+data/raw/*.zip
+data/raw/*.tar.gz
+data/preprocessed/*
+
+# Modelos entrenados (pesados)
+models/*.h5
+models/*.keras
+models/*.pt
+models/*.pth
+
+# Output y resultados intermedios
+output/metrics.csv
+output/plot_*.png
+output/report.html
+
+# Configuración local (no versionar)
+config.local.yaml
+.env
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
