@@ -62,7 +62,6 @@ Si la evaluación no pasa umbral mínimo:
 | Archivo | Para qué |
 |---------|----------|
 | `config.yaml` | Configuración general del proyecto y modelo |
-| `skill.md` | Habilidades detalladas del agente |
 | `memoria.md` | Historial de decisiones y resultados previos |
 | `src/dataset.py` | Lógica de carga y preprocesamiento |
 | `src/model.py` | Definiciones de arquitecturas disponibles |
@@ -79,6 +78,27 @@ Si la evaluación no pasa umbral mínimo:
 - Si un paso falla, intentar alternativas antes de detenerse.
 
 ---
+
+## Toma de decisiones automática
+
+El agente decide qué hacer basándose en:
+1. **Tipo de problema** (definido en config.yaml)
+2. **Estado actual** (leído de memoria.md)
+3. **Resultados anteriores** (métricas históricas en memoria.md)
+4. **Feedback de evaluaciones previas**
+
+### Reglas de decisión:
+
+```
+SI accuracy < 0.7 → Probablemente underfitting
+  → Aumentar capacidad del modelo
+  
+SI gap train/val > 0.2 → Overfitting detectado
+  → Agregar dropout, data augmentation, o reducir modelo
+  
+SI loss no converge tras N epochs → Learning rate mal ajustado
+  → Reducir learning rate a la mitad
+```
 
 ## Comandos principales que puede ejecutar
 

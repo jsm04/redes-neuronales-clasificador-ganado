@@ -14,47 +14,23 @@ project:
 data:
   raw_dir: "data/raw/"
   preprocessed_dir: "data/preprocessed/"
-  source: "kaggle"                       # Fuentes posibles: kaggle, huggingface, local
-  dataset_name: ""                        # Nombre del dataset (por definir)
   
   # Opciones de división
   train_split: 0.7
   validation_split: 0.15
-  test_split: 0.15
-  
-  # Augmentation para imágenes (ignorar si es texto/series)
-  augmentation:
-    enabled: false
-    rotation_range: 20
-    width_shift_range: 0.2
-    height_shift_range: 0.2
-    horizontal_flip: true
-    
-  # Preprocesamiento para texto (ignorar si son imágenes)
-  text_preprocessing:
-    max_length: 512
-    vocab_size: 10000
-    padding_type: "post"
 
 # ============================================
 # MODELO — Arquitectura
 # ============================================
 model:
-  # Opciones: cnn, lstm, transformer, simple_dense
-  architecture: "cnn"                     # ← CAMBIAR SEGÚN EL PROBLEMA
+  # Opciones: cnn, simple_cnn, lstm
+  architecture: "cnn"
   
   # Parámetros generales del modelo
   input_shape: [224, 224, 3]             # Para imágenes: alto, ancho, canales
   num_classes: 2                          # Cambiar según el problema (2 = binario)
   
-  # CNN específico
-  cnn:
-    filters: [32, 64, 128]
-    kernel_size: 3
-    pooling: "max"
-    
-  # LSTM específico
-  lstm:
+  # LSTM
     units: 128
     return_sequences: false
     
@@ -82,35 +58,12 @@ training:
     enabled: true
     filepath: "models/best_model.keras"   # Guardar mejor modelo
   
-# ============================================
-# EVALUACIÓN
-# ============================================
-evaluation:
-  metrics:
-    - accuracy
-    - precision
-    - recall
-    - f1_score
-    
-  generate_plots: true                    # Generar gráficos de evaluación
-  confusion_matrix: true                  # Incluir matriz de confusión
+# (no evaluation section — evaluate.py uses defaults)
   
 # ============================================
 # ENTORNO DE EJECUCIÓN
 # ============================================
 environment:
-  device: "auto"                          # auto, cpu, gpu
-  framework: "tensorflow"                 # tensorflow, pytorch
   output_dir: "output/"
   
-# ============================================
-# FEEDBACK LOOP — Auto-ajuste
-# ============================================
-feedback_loop:
-  enabled: true
-  max_iterations: 5                       # Máximo de iteraciones automáticas
-  thresholds:
-    min_accuracy: 0.7                     # Si accuracy > esto, detenerse
-    overfit_gap: 0.2                      # Gap train/val para detectar overfitting
-    
-  adjustment_strategy: "gradual"          # gradual o aggressive
+
