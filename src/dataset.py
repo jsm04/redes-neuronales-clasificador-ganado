@@ -1,218 +1,312 @@
-"""
-dataset.py — Carga, preprocesamiento y augmentation de datos.
-
-Soporta múltiples tipos de problema:
-  - image_classification: carga imágenes desde directorios por clase
-  - text_sentiment: tokeniza y prepara texto para LSTM/Transformer
-  - time_series: normaliza y crea ventanas temporales
-
-Uso:
-    python src/dataset.py --mode preprocess
-"""
-
-import os
-import yaml
-import argparse
 from pathlib import Path
+from typing import Any
 
-import numpy as np
-
-
-# ============================================================
-# CARGA DE CONFIGURACIÓN
-# ============================================================
-
-def load_config(config_path="config.yaml") -> dict:
-    """Carga la configuración desde config.yaml."""
-    with open(config_path, "r") as f:
-        return yaml.safe_load(f)
+import torch
+import yaml
+from torch.utils.data import DataLoader, Subset
+from torchvision import datasets, transforms
 
 
-# ============================================================
-# PREPROCESAMIENTO PARA CLASIFICACIÓN DE IMÁGENES
-# ============================================================
-
-def preprocess_image_dataset(config: dict):
-    """
-    Prepara dataset de imágenes.
-    
-    Espera estructura en data/raw/:
-        data/raw/
-            clase_0/
-                img1.jpg
-                img2.jpg
-            clase_1/
-                img1.jpg
-                img3.png
-    
-    Guarda en data/preprocessed/:
-        train.npy, val.npy, test.npy  (arrays de imágenes normalizadas)
-        labels_train.npy, ...          (etiquetas correspondientes)
-    """
-    raw_dir = Path(config["data"]["raw_dir"])
-    proc_dir = Path(config["data"]["preprocessed_dir"])
-    proc_dir.mkdir(parents=True, exist_ok=True)
-
-    # Detectar clases a partir de subdirectorios
-    classes = sorted([d.name for d in raw_dir.iterdir() if d.is_dir()])
-    num_classes = len(classes)
-    
-    print(f"📂 Clases detectadas: {classes}")
-    print(f"🔢 Número de clases: {num_classes}")
-
-    # Cargar e imagenar datos
-    X_train, y_train = load_images_from_dir(raw_dir / "clase_0", raw_dir / "clase_1")  # Ajustar según estructura real
-    
-    # Normalizar píxeles a [0, 1]
-    X_train = X_train.astype("float32") / 255.0
-
-    # Guardar en formato numpy
-    np.save(proc_dir / "X_train.npy", X_train)
-    np.save(proc_dir / "y_train.npy", y_train)
-    
-    print(f"✅ Dataset guardado en {proc_dir}")
-    return num_classes
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
-def load_images_from_dir(*class_dirs):
-    """Carga imágenes desde directorios de clases."""
-    from PIL import Image
-    
-    all_images = []
-    all_labels = []
-    
-    for label, class_dir in enumerate(class_dirs):
-        if not class_dir.exists():
-            continue
-        for img_path in sorted(class_dir.iterdir()):
-            if img_path.suffix.lower() in [".jpg", ".jpeg", ".png", ".bmp"]:
-                img = Image.open(img_path).convert("RGB")
-                all_images.append(np.array(img))
-                all_labels.append(label)
-    
-    return np.array(all_images), np.array(all_labels)
+def load_config(path: str = "config.yaml") -> dict[str, Any]:
+    config_path = Path(path)
+
+    if not config_path.is_absolute():
+        config_path = PROJECT_ROOT / config_path
+
+    with config_path.open("r", encoding="utf-8") as file:
+        config = yaml.safe_load(file)
+
+    if not isinstance(config, dict):
+        raise ValueError("Configuration file must contain a mapping.")
+
+    return config
 
 
-# ============================================================
-# PREPROCESAMIENTO PARA ANÁLISIS DE TEXTO / SENTIMIENTOS
-# ============================================================
-
-def preprocess_text_dataset(config: dict):
-    """
-    Prepara dataset de texto para análisis de sentimientos.
-    
-    Espera un archivo CSV en data/raw/ con columnas: 'text', 'label'
-    Guarda tokens y secuencias preparadas en data/preprocessed/.
-    """
-    import pandas as pd
-    
-    raw_dir = Path(config["data"]["raw_dir"])
-    proc_dir = Path(config["data"]["preprocessed_dir"])
-    proc_dir.mkdir(parents=True, exist_ok=True)
-
-    # Cargar dataset (ajustar nombre del archivo)
-    csv_files = list(raw_dir.glob("*.csv"))
-    if not csv_files:
-        print("⚠️ No se encontraron CSV en data/raw/. Añade un archivo con 'text' y 'label'.")
-        return 2  # Default binario
-
-    df = pd.read_csv(csv_files[0])
-    
-    text_col = "text" if "text" in df.columns else df.columns[0]
-    label_col = "label" if "label" in df.columns else df.columns[-1]
-    
-    texts = df[text_col].astype(str).values
-    labels = df[label_col].values
-    
-    # Tokenizar y secenciar (usando tokenizer de TF o sklearn)
-    max_length = config["data"].get("text_preprocessing", {}).get("max_length", 512)
-    
-    # Simple approach: usar count vectorizer como placeholder
-    from sklearn.feature_extraction.text import TfidfVectorizer
-    from sklearn.model_selection import train_test_split
-    
-    vectorizer = TfidfVectorizer(max_features=config["data"]["text_preprocessing"].get("vocab_size", 10000))
-    X = vectorizer.fit_transform(texts)
-    
-    # Normalizar labels a enteros si es necesario
-    if labels.dtype == object:
-        unique_labels = np.unique(labels)
-        label_map = {l: i for i, l in enumerate(unique_labels)}
-        y = np.array([label_map[l] for l in labels])
-        num_classes = len(label_map)
-    else:
-        y = labels.astype(int)
-        num_classes = len(np.unique(y))
-
-    # Dividir dataset
-    split_train = config["data"]["train_split"]
-    split_val = config["data"]["validation_split"] / (1 - split_train)
-    
-    X_train, X_temp, y_train, y_temp = train_test_split(
-        X.toarray(), y, test_size=1 - split_train, random_state=42, stratify=y
-    )
-    X_val, X_test, y_val, y_test = train_test_split(
-        X_temp, y_temp, test_size=split_val / (1 - split_train), 
-        random_state=42, stratify=y_temp
+def build_transforms(
+    config: dict[str, Any],
+) -> tuple[transforms.Compose, transforms.Compose]:
+    height, width, channels = map(
+        int,
+        config["model"]["input_shape"],
     )
 
-    # Guardar
-    np.save(proc_dir / "X_train.npy", X_train.astype("float32"))
-    np.save(proc_dir / "y_train.npy", y_train)
-    np.save(proc_dir / "X_val.npy", X_val.astype("float32"))
-    np.save(proc_dir / "y_val.npy", y_val)
-    np.save(proc_dir / "X_test.npy", X_test.astype("float32"))
-    np.save(proc_dir / "y_test.npy", y_test)
-    
-    print(f"✅ Dataset de texto guardado: {num_classes} clases")
-    return num_classes
+    if channels != 3:
+        raise ValueError(
+            "The dataset expects RGB images with 3 channels."
+        )
+
+    augmentation = config["data"].get(
+        "augmentation",
+        {},
+    )
+
+    train_transforms: list[Any] = [
+        transforms.Resize((height, width)),
+    ]
+
+    if augmentation.get("enabled", True):
+        if augmentation.get("horizontal_flip", True):
+            train_transforms.append(
+                transforms.RandomHorizontalFlip()
+            )
+
+        rotation = float(
+            augmentation.get("rotation", 0.0)
+        )
+
+        if rotation > 0:
+            train_transforms.append(
+                transforms.RandomRotation(
+                    degrees=rotation
+                )
+            )
+
+        zoom = float(
+            augmentation.get("zoom", 0.0)
+        )
+
+        if zoom > 0:
+            train_transforms.append(
+                transforms.RandomAffine(
+                    degrees=0,
+                    scale=(
+                        max(1.0 - zoom, 0.0),
+                        1.0 + zoom,
+                    ),
+                )
+            )
+
+        contrast = float(
+            augmentation.get("contrast", 0.0)
+        )
+
+        if contrast > 0:
+            train_transforms.append(
+                transforms.ColorJitter(
+                    contrast=contrast
+                )
+            )
+
+    train_transforms.append(
+        transforms.ToTensor()
+    )
+
+    eval_transforms = [
+        transforms.Resize((height, width)),
+        transforms.ToTensor(),
+    ]
+
+    return (
+        transforms.Compose(train_transforms),
+        transforms.Compose(eval_transforms),
+    )
 
 
-# ============================================================
-# PREPROCESAMIENTO PARA SERIES TEMPORALES (placeholder)
-# ============================================================
-
-def preprocess_timeseries_dataset(config: dict):
-    """
-    Prepara dataset de series temporales.
-    
-    Espera archivo CSV con columnas de tiempo y valores numéricos.
-    Crea ventanas deslizantes para predicción.
-    """
-    import pandas as pd
-    
+def build_datasets(
+    config: dict[str, Any],
+) -> tuple[
+    Subset,
+    Subset,
+    Subset,
+    list[str],
+]:
     raw_dir = Path(config["data"]["raw_dir"])
-    proc_dir = Path(config["data"]["preprocessed_dir"])
-    proc_dir.mkdir(parents=True, exist_ok=True)
 
-    # Placeholder: cargar CSV y normalizar valores entre 0 y 1
-    print("⚙️ Preprocesamiento de series temporales (placeholder)")
-    
-    return 1  # Default
+    if not raw_dir.is_absolute():
+        raw_dir = PROJECT_ROOT / raw_dir
+
+    if not raw_dir.is_dir():
+        raise FileNotFoundError(
+            f"Dataset directory not found: {raw_dir}"
+        )
+
+    train_transform, eval_transform = build_transforms(
+        config
+    )
+
+    # This dataset is used only to discover classes and
+    # generate deterministic split indices.
+    base_dataset = datasets.ImageFolder(
+        raw_dir,
+        transform=eval_transform,
+    )
+
+    total_size = len(base_dataset)
+
+    if total_size == 0:
+        raise ValueError(
+            f"No images found in dataset: {raw_dir}"
+        )
+
+    train_split = float(
+        config["data"]["train_split"]
+    )
+
+    validation_split = float(
+        config["data"]["validation_split"]
+    )
+
+    test_split = float(
+        config["data"]["test_split"]
+    )
+
+    split_total = (
+        train_split
+        + validation_split
+        + test_split
+    )
+
+    if abs(split_total - 1.0) > 1e-6:
+        raise ValueError(
+            "train_split + validation_split + "
+            "test_split must equal 1.0."
+        )
+
+    train_size = int(
+        total_size * train_split
+    )
+
+    validation_size = int(
+        total_size * validation_split
+    )
+
+    test_size = (
+        total_size
+        - train_size
+        - validation_size
+    )
+
+    if min(
+        train_size,
+        validation_size,
+        test_size,
+    ) <= 0:
+        raise ValueError(
+            "Each dataset split must contain at least one image."
+        )
+
+    generator = torch.Generator().manual_seed(
+        int(config["data"]["random_seed"])
+    )
+
+    train_base, validation_base, test_base = (
+        torch.utils.data.random_split(
+            base_dataset,
+            [
+                train_size,
+                validation_size,
+                test_size,
+            ],
+            generator=generator,
+        )
+    )
+
+    # Use a separate ImageFolder for training so that
+    # augmentation is applied only to training samples.
+    train_source = datasets.ImageFolder(
+        raw_dir,
+        transform=train_transform,
+    )
+
+    train_dataset = Subset(
+        train_source,
+        train_base.indices,
+    )
+
+    validation_dataset = Subset(
+        base_dataset,
+        validation_base.indices,
+    )
+
+    test_dataset = Subset(
+        base_dataset,
+        test_base.indices,
+    )
+
+    return (
+        train_dataset,
+        validation_dataset,
+        test_dataset,
+        base_dataset.classes,
+    )
 
 
-# ============================================================
-# ENTRY POINT
-# ============================================================
+def build_dataloaders(
+    config: dict[str, Any],
+) -> tuple[
+    DataLoader,
+    DataLoader,
+    DataLoader,
+    list[str],
+]:
+    (
+        train_dataset,
+        validation_dataset,
+        test_dataset,
+        classes,
+    ) = build_datasets(config)
 
-def main():
-    parser = argparse.ArgumentParser(description="Preprocesamiento de dataset")
-    parser.add_argument("--mode", choices=["preprocess"], default="preprocess")
-    args = parser.parse_args()
-    
-    config = load_config()
-    
-    problem_type = config["project"]["problem_type"]
-    
-    if "image" in problem_type:
-        num_classes = preprocess_image_dataset(config)
-    elif "text" in problem_type or "sentiment" in problem_type:
-        num_classes = preprocess_text_dataset(config)
-    else:
-        num_classes = preprocess_timeseries_dataset(config)
-    
-    print(f"\n🏁 Preprocesamiento completado. {num_classes} clases detectadas.")
+    batch_size = int(
+        config["data"]["batch_size"]
+    )
+
+    common_kwargs = {
+        "batch_size": batch_size,
+        "num_workers": 2,
+        "pin_memory": torch.cuda.is_available(),
+    }
+
+    train_loader = DataLoader(
+        train_dataset,
+        shuffle=True,
+        **common_kwargs,
+    )
+
+    validation_loader = DataLoader(
+        validation_dataset,
+        shuffle=False,
+        **common_kwargs,
+    )
+
+    test_loader = DataLoader(
+        test_dataset,
+        shuffle=False,
+        **common_kwargs,
+    )
+
+    return (
+        train_loader,
+        validation_loader,
+        test_loader,
+        classes,
+    )
 
 
-if __name__ == "__main__":
-    main()
+def get_dataset_info(
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    raw_dir = Path(config["data"]["raw_dir"])
+
+    if not raw_dir.is_absolute():
+        raw_dir = PROJECT_ROOT / raw_dir
+
+    dataset = datasets.ImageFolder(raw_dir)
+
+    class_counts = {
+        class_name: 0
+        for class_name in dataset.classes
+    }
+
+    for _, class_index in dataset.samples:
+        class_name = dataset.classes[class_index]
+        class_counts[class_name] += 1
+
+    return {
+        "classes": dataset.classes,
+        "num_classes": len(dataset.classes),
+        "total_images": len(dataset),
+        "class_counts": class_counts,
+    }

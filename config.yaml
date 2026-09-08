@@ -1,69 +1,92 @@
 # ============================================
-# CONFIGURACIÓN PRINCIPAL DEL PROYECTO
+# CONFIGURACIÓN PRINCIPAL
 # ============================================
 
 project:
   name: "redes-neuronales"
-  description: "Proyecto universitario de redes neuronales"
-  # Tipos soportados: image_classification, text_sentiment, time_series, voice_recognition
-  problem_type: "image_classification"   # ← CAMBIAR SEGÚN EL PROBLEMA ELEGIDO
+  description: "Clasificación de imágenes de ganado"
+  problem_type: "image_classification"
+
 
 # ============================================
-# DATASETS
+# DATASET
 # ============================================
+
 data:
   raw_dir: "data/raw/"
-  preprocessed_dir: "data/preprocessed/"
-  
-  # Opciones de división
-  train_split: 0.7
+
+  # Tamaño de lote utilizado por tf.data
+  batch_size: 32
+
+  # División del dataset
+  train_split: 0.70
   validation_split: 0.15
+  test_split: 0.15
+
+  # Semilla para obtener divisiones reproducibles
+  random_seed: 42
+
+  # Aumento de datos aplicado únicamente al entrenamiento
+  augmentation:
+    enabled: true
+    horizontal_flip: true
+    rotation: 10
+    zoom: 0.10
+    contrast: 0.10
+
 
 # ============================================
-# MODELO — Arquitectura
+# MODELO
 # ============================================
+
 model:
-  # Opciones: cnn, simple_cnn, lstm
+  # CNN para clasificación de imágenes
   architecture: "cnn"
-  
-  # Parámetros generales del modelo
-  input_shape: [224, 224, 3]             # Para imágenes: alto, ancho, canales
-  num_classes: 2                          # Cambiar según el problema (2 = binario)
-  
-  # LSTM
-    units: 128
-    return_sequences: false
-    
-  # Regularización
+
+  # Alto, ancho, canales
+  input_shape: [224, 224, 3]
+
+  # Se actualizará automáticamente según las
+  # clases encontradas en data/raw/
+  num_classes: 2
+
   regularization:
     dropout_rate: 0.5
-    l2_regularization: 0.01
-    
+    l2_regularization: 0.0
+
+
 # ============================================
-# ENTRENAMIENTO — Hiperparámetros
+# ENTRENAMIENTO
 # ============================================
+
 training:
   epochs: 50
-  batch_size: 32
   learning_rate: 0.001
-  optimizer: "adam"                       # adam, sgd, rmsprop
-  
-  # Callbacks
+  optimizer: "adam"
+
   early_stopping:
     enabled: true
-    patience: 10                          # Épocas sin mejora antes de detenerse
-    monitor: "val_loss"                   # Métrica a monitorear
-    
+    monitor: "val_loss"
+    patience: 10
+
   checkpointing:
     enabled: true
-    filepath: "models/best_model.keras"   # Guardar mejor modelo
-  
-# (no evaluation section — evaluate.py uses defaults)
-  
+    filepath: "output/best_model.pt"
+    monitor: "val_loss"
+
+  reduce_lr:
+    enabled: true
+    monitor: "val_loss"
+    factor: 0.5
+    patience: 4
+    min_lr: 0.00001
+
+
 # ============================================
-# ENTORNO DE EJECUCIÓN
+# ENTORNO
 # ============================================
+
 environment:
   output_dir: "output/"
-  
+
 

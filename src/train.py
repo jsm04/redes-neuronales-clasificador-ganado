@@ -1,187 +1,426 @@
-"""
-train.py — Loop principal de entrenamiento del modelo.
-
-Carga datos preprocesados, construye el modelo según config.yaml,
-entrena con callbacks (early stopping, checkpointing) y guarda resultados.
-
-Uso:
-    python src/train.py
-
-O con Makefile:
-    make train
-"""
-
-import json
-import sys
-from datetime import datetime
+import csv
+import random
 from pathlib import Path
+from typing import Any
 
-# Asegurar que el proyecto esté en el path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import numpy as np
+import torch
+import yaml
 
-from src.dataset import load_config
+from src.dataset import build_dataloaders
 from src.model import build_model
 
 
-def train(config=None):
-    """Entrena el modelo completo según la configuración."""
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-    if config is None:
-        config = load_config()
 
-    print("=" * 60)
-    print("🧠 INICIANDO ENTRENAMIENTO")
-    print("=" * 60)
-    print(f"   Tipo de problema: {config['project']['problem_type']}")
-    print(f"   Arquitectura:     {config['model']['architecture']}")
-    print(f"   Épocas:           {config['training']['epochs']}")
-    print(f"   Batch size:       {config['training']['batch_size']}")
-    print(f"   Learning rate:    {config['training']['learning_rate']}")
-    print("=" * 60)
+def load_config(
+    path: str = "config.yaml",
+) -> dict[str, Any]:
+    config_path = Path(path)
 
-    # 1. Construir modelo
-    model, num_classes = build_model(config)
+    if not config_path.is_absolute():
+        config_path = PROJECT_ROOT / config_path
 
-    # 2. Cargar datos preprocesados
-    proc_dir = Path(config["data"]["preprocessed_dir"])
+    with config_path.open(
+        "r",
+        encoding="utf-8",
+    ) as file:
+        config = yaml.safe_load(file)
 
-    X_train_raw = None
-    X_val_raw = None
-    y_val = None
-    X_train = None
-
-    if "image" in config["project"]["problem_type"]:
-        X_train = load_np_data(proc_dir / "X_train.npy")
-        y_train = load_np_data(proc_dir / "y_train.npy")
-    else:
-        # Para texto/series temporales, cargar todos los splits
-        X_train_raw = load_np_data(proc_dir / "X_train.npy")
-        y_train = load_np_data(proc_dir / "y_train.npy")
-
-        if (proc_dir / "X_val.npy").exists():
-            X_val_raw = load_np_data(proc_dir / "X_val.npy")
-            y_val = load_np_data(proc_dir / "y_val.npy")
-        else:
-            from sklearn.model_selection import train_test_split
-
-            split_val = config["data"]["validation_split"]
-            X_train_raw, X_val_raw, y_train, y_val = train_test_split(
-                X_train_raw,
-                y_train,
-                test_size=split_val / (1 - config["data"]["train_split"]),
-                random_state=42,
-                stratify=y_train,
-            )
-
-    # 3. Configurar callbacks
-    callbacks = []
-
-    # Early Stopping
-    if config["training"]["early_stopping"]["enabled"]:
-        es_config = config["training"]["early_stopping"]
-        callbacks.append(
-            __import__("tensorflow").keras.callbacks.EarlyStopping(
-                monitor=es_config.get("monitor", "val_loss"),
-                patience=es_config.get("patience", 10),
-                restore_best_weights=True,
-                verbose=1,
-            )
+    if not isinstance(config, dict):
+        raise ValueError(
+            "Configuration file must contain a mapping."
         )
 
-    # Model Checkpoint (guardar mejor modelo)
-    if config["training"]["checkpointing"]["enabled"]:
-        filepath = Path(config["training"]["checkpointing"]["filepath"])
-        filepath.parent.mkdir(parents=True, exist_ok=True)
-        callbacks.append(
-            __import__("tensorflow").keras.callbacks.ModelCheckpoint(
-                str(filepath), monitor="val_loss", save_best_only=True, verbose=1
-            )
+    return config
+
+
+def set_seed(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def train_epoch(
+    model: torch.nn.Module,
+    loader: torch.utils.data.DataLoader,
+    criterion: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    device: torch.device,
+) -> tuple[float, float]:
+    model.train()
+
+    total_loss = 0.0
+    correct = 0
+    total = 0
+
+    for images, labels in loader:
+        images = images.to(
+            device,
+            non_blocking=True,
         )
 
-    # 4. Entrenar
-    print("\n🚀 Entrenando modelo...\n")
+        labels = labels.to(
+            device,
+            non_blocking=True,
+        )
 
-    history = model.fit(
-        X_train_raw if "image" not in config["project"]["problem_type"] else X_train,
-        y_train,
-        epochs=config["training"]["epochs"],
-        batch_size=config["training"]["batch_size"],
-        validation_data=(
-            X_val_raw if "image" not in config["project"]["problem_type"] else None,
-            y_val if "image" not in config["project"]["problem_type"] else None,
-        ),
-        callbacks=callbacks,
-        verbose=1,
+        optimizer.zero_grad(
+            set_to_none=True
+        )
+
+        outputs = model(images)
+        loss = criterion(
+            outputs,
+            labels,
+        )
+
+        loss.backward()
+        optimizer.step()
+
+        batch_size = images.size(0)
+
+        total_loss += (
+            loss.item() * batch_size
+        )
+
+        predictions = outputs.argmax(
+            dim=1
+        )
+
+        correct += (
+            predictions == labels
+        ).sum().item()
+
+        total += batch_size
+
+    if total == 0:
+        raise ValueError(
+            "Training dataset is empty."
+        )
+
+    return (
+        total_loss / total,
+        correct / total,
     )
 
-    # 5. Guardar métricas de entrenamiento
-    save_metrics(history, config)
 
-    print("\n✅ Entrenamiento completado!")
-    return model, history
+@torch.no_grad()
+def evaluate_epoch(
+    model: torch.nn.Module,
+    loader: torch.utils.data.DataLoader,
+    criterion: torch.nn.Module,
+    device: torch.device,
+) -> tuple[float, float]:
+    model.eval()
+
+    total_loss = 0.0
+    correct = 0
+    total = 0
+
+    for images, labels in loader:
+        images = images.to(
+            device,
+            non_blocking=True,
+        )
+
+        labels = labels.to(
+            device,
+            non_blocking=True,
+        )
+
+        outputs = model(images)
+
+        loss = criterion(
+            outputs,
+            labels,
+        )
+
+        batch_size = images.size(0)
+
+        total_loss += (
+            loss.item() * batch_size
+        )
+
+        predictions = outputs.argmax(
+            dim=1
+        )
+
+        correct += (
+            predictions == labels
+        ).sum().item()
+
+        total += batch_size
+
+    if total == 0:
+        raise ValueError(
+            "Validation dataset is empty."
+        )
+
+    return (
+        total_loss / total,
+        correct / total,
+    )
 
 
-def load_np_data(filepath: Path):
-    """Carga un archivo .npy."""
-    import numpy as np
+def save_metrics(
+    path: Path,
+    history: list[dict[str, float]],
+) -> None:
+    if not history:
+        return
 
-    if not filepath.exists():
-        raise FileNotFoundError(f"Archivo no encontrado: {filepath}")
-    data = np.load(str(filepath))
-    print(f"   📦 Cargado {str(filepath)}: shape={data.shape}, dtype={data.dtype}")
-    return data
+    fieldnames = list(history[0].keys())
+
+    with path.open(
+        "w",
+        newline="",
+        encoding="utf-8",
+    ) as file:
+        writer = csv.DictWriter(
+            file,
+            fieldnames=fieldnames,
+        )
+
+        writer.writeheader()
+        writer.writerows(history)
 
 
-def save_metrics(history, config):
-    """Guarda las métricas de entrenamiento en output/metrics.csv."""
-    output_dir = Path(config["environment"]["output_dir"])
-    output_dir.mkdir(parents=True, exist_ok=True)
+def main() -> None:
+    config = load_config()
 
-    import pandas as pd
+    seed = int(
+        config["data"]["random_seed"]
+    )
 
-    metrics_df = pd.DataFrame(history.history)
-    metrics_path = output_dir / "training_metrics.csv"
-    metrics_df.to_csv(metrics_path, index=False)
+    set_seed(seed)
 
-    # Guardar resumen en formato legible para el agente
-    summary = {
-        "timestamp": datetime.now().isoformat(),
-        "epochs_run": len(history.history["loss"]),
-        "final_train_loss": float(history.history["loss"][-1]),
-        "final_val_loss": float(history.history.get("val_loss", ["N/A"])[-1])
-        if history.history.get("val_loss")
-        else None,
-        "final_accuracy": float(max(history.history["accuracy"]))
-        if "accuracy" in history.history
-        else None,
-        "best_epoch": int(
-            next(
-                iter(
-                    [
-                        i
-                        for i, v in enumerate(history.history.get("val_accuracy", []))
-                        if v == max(history.history.get("val_accuracy", [0]))
-                    ]
+    device = torch.device(
+        "cuda"
+        if torch.cuda.is_available()
+        else "cpu"
+    )
+
+    print(f"Device: {device}")
+
+    if device.type == "cuda":
+        print(
+            f"GPU: {torch.cuda.get_device_name(0)}"
+        )
+
+    (
+        train_loader,
+        validation_loader,
+        _,
+        classes,
+    ) = build_dataloaders(config)
+
+    print(f"Classes: {classes}")
+
+    model = build_model(config)
+    model.to(device)
+
+    criterion = torch.nn.CrossEntropyLoss()
+
+    learning_rate = float(
+        config["training"]["learning_rate"]
+    )
+
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=learning_rate,
+    )
+
+    training_config = config["training"]
+
+    reduce_lr_config = training_config.get(
+        "reduce_lr",
+        {},
+    )
+
+    scheduler = None
+
+    if reduce_lr_config.get(
+        "enabled",
+        False,
+    ):
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode="min",
+            factor=float(
+                reduce_lr_config.get(
+                    "factor",
+                    0.5,
                 )
+            ),
+            patience=int(
+                reduce_lr_config.get(
+                    "patience",
+                    4,
+                )
+            ),
+            min_lr=float(
+                reduce_lr_config.get(
+                    "min_lr",
+                    1e-5,
+                )
+            ),
+        )
+
+    output_dir = Path(
+        config["environment"]["output_dir"]
+    )
+
+    if not output_dir.is_absolute():
+        output_dir = PROJECT_ROOT / output_dir
+
+    output_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    epochs = int(
+        training_config["epochs"]
+    )
+
+    early_stopping_config = (
+        training_config.get(
+            "early_stopping",
+            {},
+        )
+    )
+
+    early_stopping_enabled = (
+        early_stopping_config.get(
+            "enabled",
+            False,
+        )
+    )
+
+    early_stopping_patience = int(
+        early_stopping_config.get(
+            "patience",
+            10,
+        )
+    )
+
+    best_validation_loss = float("inf")
+    epochs_without_improvement = 0
+
+    history: list[dict[str, float]] = []
+
+    best_model_path = (
+        output_dir /
+        "best_model.pt"
+    )
+
+    final_model_path = (
+        output_dir /
+        "final_model.pt"
+    )
+
+    for epoch in range(epochs):
+        train_loss, train_accuracy = train_epoch(
+            model,
+            train_loader,
+            criterion,
+            optimizer,
+            device,
+        )
+
+        validation_loss, validation_accuracy = (
+            evaluate_epoch(
+                model,
+                validation_loader,
+                criterion,
+                device,
             )
-        ),
-    }
+        )
 
-    summary_path = output_dir / "training_summary.json"
-    with open(summary_path, "w") as f:
-        json.dump(summary, f, indent=2)
+        if scheduler is not None:
+            scheduler.step(
+                validation_loss
+            )
 
-    print(f"\n📊 Métricas guardadas en {metrics_path}")
-    print(f"📋 Resumen guardado en {summary_path}")
+        current_learning_rate = (
+            optimizer.param_groups[0]["lr"]
+        )
 
+        epoch_metrics = {
+            "epoch": float(epoch + 1),
+            "loss": train_loss,
+            "accuracy": train_accuracy,
+            "val_loss": validation_loss,
+            "val_accuracy": validation_accuracy,
+            "learning_rate": current_learning_rate,
+        }
 
-# ============================================================
-# ENTRY POINT
-# ============================================================
+        history.append(epoch_metrics)
 
+        print(
+            f"Epoch {epoch + 1}/{epochs} "
+            f"- loss={train_loss:.4f} "
+            f"acc={train_accuracy:.4f} "
+            f"val_loss={validation_loss:.4f} "
+            f"val_acc={validation_accuracy:.4f} "
+            f"lr={current_learning_rate:.6g}"
+        )
 
-def main():
-    train()
+        if validation_loss < best_validation_loss:
+            best_validation_loss = validation_loss
+            epochs_without_improvement = 0
+
+            torch.save(
+                model.state_dict(),
+                best_model_path,
+            )
+
+            print(
+                f"  Saved best model: {best_model_path}"
+            )
+
+        else:
+            epochs_without_improvement += 1
+
+        if (
+            early_stopping_enabled
+            and epochs_without_improvement
+            >= early_stopping_patience
+        ):
+            print(
+                f"Early stopping after "
+                f"{epoch + 1} epochs."
+            )
+            break
+
+    torch.save(
+        model.state_dict(),
+        final_model_path,
+    )
+
+    metrics_path = (
+        output_dir /
+        "training_metrics.csv"
+    )
+
+    save_metrics(
+        metrics_path,
+        history,
+    )
+
+    print(
+        f"Final model saved to: {final_model_path}"
+    )
+
+    print(
+        f"Training metrics saved to: {metrics_path}"
+    )
+
+    print("Training complete.")
 
 
 if __name__ == "__main__":
