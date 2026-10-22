@@ -23,6 +23,7 @@
 | 2026-10-22 | Checkpoint and device configurable via `CATTLE_*` env vars; paths resolved in `config.py` | The service must start from any working directory | ✅ Not dependent on cwd |
 | 2026-10-22 | Next.js frontend (App Router, TypeScript, plain CSS) that only calls the API | The browser must never receive the model | ✅ Build and types pass |
 | 2026-10-22 | No new tests for now; three exist in `tests/test_inference.py` | Favor a simple delivery | ✅ `pytest` green |
+| 2026-10-22 | Allowed explanatory comments in `colab/py/red_neuronal_ganado.py`; logic unchanged | User needs to understand the network; the script stays the training source of truth | ✅ Compiles, ruff unchanged |
 
 > **Note:** Record every relevant decision here with date, description and
 > outcome. This lets the next agent learn from past iterations and avoid

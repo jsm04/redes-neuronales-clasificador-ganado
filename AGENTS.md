@@ -9,9 +9,11 @@ Instructions for agents working in this repository. Full details in
 
 ## Hard rules
 
-1. **Never modify `colab/py/red_neuronal_ganado.py`.** It is the training
-   source of truth. If the backend needs logic from it, copy the minimal code
-   into `backend/src/cattle_api/` and leave the original untouched.
+1. **Never change the logic of `colab/py/red_neuronal_ganado.py`.** It is the
+   training source of truth. Comments and docstrings may be improved; code,
+   configuration values and behavior must stay untouched. If the backend needs
+   logic from it, copy the minimal code into `backend/src/cattle_api/` and
+   leave the original intact.
 2. **Do not reorganize training or move the checkpoint.** It stays at
    `data/NN/cattle_training/best_cattle_breed_model.pth`.
 3. **Simplicity first:** the shortest diff that works. No abstractions,

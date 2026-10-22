@@ -2,6 +2,10 @@
 
 Diseñado para Google Colab, pero organizado en clases para facilitar su análisis,
 mantenimiento y ejecución desde VS Code.
+
+Flujo: Data (imágenes → tensores) → Model (EfficientNet-B0) → Trainer
+(entrena y guarda el checkpoint) → Evaluation (métricas) → Inference
+(carga el checkpoint y predice).
 """
 
 from __future__ import annotations
@@ -42,17 +46,23 @@ class Config:
     dataset_path: Path = PROJECT_ROOT / 'data' / 'NN' / 'cattle_dataset'
     output_dir: Path = PROJECT_ROOT / 'data' / 'NN' / 'cattle_training'
     seed: int = 42
+    # 224x224 es la resolución con la que se preentrenó EfficientNet-B0.
     image_size: int = 224
+    # Imágenes por paso; valores mayores usan más memoria de GPU.
     batch_size: int = 32
     num_workers: int = 2
+    # Épocas con el backbone congelado antes de iniciar el ajuste fino.
     head_epochs: int = 3
+    # Tope total de épocas y paciencia del early stopping.
     max_epochs: int = 20
     patience: int = 5
     weight_decay: float = 1e-4
+    # LR alto para la cabeza nueva; LR bajo para no destruir el backbone.
     head_learning_rate: float = 1e-3
     backbone_learning_rate: float = 1e-4
     classifier_learning_rate: float = 3e-4
     minimum_images_per_class: int = 10
+    # Precisión mixta: entrena en float16 en GPU y así ocupa menos memoria.
     use_amp: bool = True
 
 
@@ -98,6 +108,7 @@ class Runtime:
     """Gestiona el dispositivo de cómputo y la precisión mixta."""
 
     def __init__(self, use_amp: bool = True) -> None:
+        # Usa la GPU si existe; en CPU el entrenamiento será mucho más lento.
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.amp_enabled = use_amp and self.device.type == 'cuda'
         self.amp_dtype = torch.float16
@@ -182,7 +193,8 @@ class Data:
         self.val_loader: DataLoader | None = None
         self.test_loader: DataLoader | None = None
 
-        # Las aumentaciones se aplican únicamente al conjunto de entrenamiento.
+        # Aumentos: el modelo ve variantes de la misma foto y generaliza mejor.
+        # Recorte aleatorio al 75-100% del área, espejo, giro y cambios de color.
         self.train_transform = transforms.Compose(
             [
                 transforms.RandomResizedCrop(
@@ -196,13 +208,17 @@ class Data:
                     contrast=0.15,
                     saturation=0.10,
                 ),
+                # PIL → tensor float32 en [0, 1] con forma (3, 224, 224).
                 transforms.ToTensor(),
+                # Normaliza con la media y desviación de ImageNet, la misma
+                # escala con la que se preentrenó el backbone.
                 transforms.Normalize(
                     mean=[0.485, 0.456, 0.406],
                     std=[0.229, 0.224, 0.225],
                 ),
             ]
         )
+        # En validación y prueba no se aumenta: solo recorte central + normalización.
         self.eval_transform = weights.transforms()
 
     def prepare(self) -> None:
@@ -232,6 +248,8 @@ class Data:
                 f'{self.config.minimum_images_per_class} imágenes.'
             )
 
+        # División estratificada 80/10/10: cada parte conserva la proporción
+        # de razas, importante cuando algunas clases tienen menos fotos.
         all_indices = np.arange(len(dataset), dtype=np.int64)
         all_labels = np.asarray(dataset.targets, dtype=np.int64)
 
@@ -314,6 +332,7 @@ class Data:
         if self.dataset is None:
             raise RuntimeError('Primero debe prepararse el conjunto de datos.')
 
+        # Razas con menos fotos reciben un peso mayor en la pérdida.
         labels = np.asarray(self.dataset.targets, dtype=np.int64)[self.train_indices]
         counts = np.bincount(labels, minlength=len(self.class_names))
         weights = len(labels) / (len(self.class_names) * np.maximum(counts, 1))
@@ -332,12 +351,18 @@ class Model:
         device: torch.device,
     ) -> None:
         self.device = device
+        # EfficientNet-B0 es una CNN preentrenada en ImageNet (~5.3 M de
+        # parámetros con 1000 clases). Recibe imágenes 224x224x3 y devuelve
+        # logits; la parte convolucional actúa como extractor de características.
         self.network = efficientnet_b0(weights=weights)
 
         classifier = self.network.classifier[1]
         if not isinstance(classifier, nn.Linear):
             raise TypeError('Se esperaba una capa nn.Linear en el clasificador.')
 
+        # Se sustituye la capa final de 1000 clases: 1280 características de
+        # entrada por una neurona de salida por raza. Con 5 razas son 6405
+        # parámetros nuevos; el resto del modelo (~4.0 M) se reutiliza.
         self.network.classifier[1] = nn.Linear(
             in_features=classifier.in_features,
             out_features=class_count,
@@ -346,11 +371,13 @@ class Model:
 
     def freeze_backbone(self) -> None:
         """Congela las capas convolucionales para entrenar primero el clasificador."""
+        # requires_grad=False evita que el backbone cambie: solo aprende la cabeza.
         for parameter in self.network.features.parameters():
             parameter.requires_grad = False
 
     def unfreeze_backbone(self) -> None:
         """Habilita todas las capas para el ajuste fino."""
+        # Se descongela todo, pero el backbone usa un learning rate más bajo.
         for parameter in self.network.features.parameters():
             parameter.requires_grad = True
 
@@ -380,6 +407,7 @@ class Trainer:
         self.criterion = criterion
         self.checkpoint_path = config.output_dir / 'best_cattle_breed_model.pth'
 
+        # Fase 1: solo se optimiza el clasificador nuevo; el backbone está congelado.
         self.optimizer = torch.optim.AdamW(
             model.network.classifier.parameters(),
             lr=config.head_learning_rate,
@@ -403,6 +431,7 @@ class Trainer:
 
     def _configure_fine_tuning(self) -> None:
         self.model.unfreeze_backbone()
+        # Fase 2: dos grupos con LR distinto; AdamW actualiza cada grupo con el suyo.
         self.optimizer = torch.optim.AdamW(
             [
                 {
@@ -432,6 +461,8 @@ class Trainer:
         predictions: list[int] = []
         targets: list[int] = []
 
+        # Cada lote es (images, labels): float32 (float16 con autocast) de forma
+        # (lote, 3, 224, 224) y etiquetas int64 de forma (lote,).
         for images, labels, *_ in loader:
             images = images.to(self.runtime.device, non_blocking=True)
             labels = labels.to(self.runtime.device, non_blocking=True)
@@ -441,21 +472,26 @@ class Trainer:
 
             with torch.set_grad_enabled(training):
                 with self.runtime.autocast():
+                    # Logits de forma (lote, número de razas), sin softmax todavía.
                     logits = network(images)
                     loss = self.criterion(logits, labels)
 
                 if training:
+                    # GradScaler evita que los gradientes float16 se desborden.
                     self.runtime.scaler.scale(loss).backward()
                     self.runtime.scaler.step(self.optimizer)
                     self.runtime.scaler.update()
 
+            # Se acumula la pérdida y se multiplica por el tamaño del lote.
             total_loss += loss.item() * labels.size(0)
+            # argmax elige la clase con mayor logit; se compara con la etiqueta real.
             predictions.extend(logits.argmax(dim=1).detach().cpu().tolist())
             targets.extend(labels.detach().cpu().tolist())
 
         if not targets:
             raise ValueError('El cargador de datos está vacío.')
 
+        # F1 macro promedia las razas por igual: no premia a las mayoritarias.
         return EpochMetrics(
             loss=total_loss / len(targets),
             accuracy=float(np.mean(np.asarray(predictions) == np.asarray(targets))),
@@ -481,6 +517,7 @@ class Trainer:
         start_time = time.time()
 
         for epoch in range(self.config.max_epochs):
+            # Primero la cabeza nueva con backbone congelado; luego fine-tuning.
             if epoch == self.config.head_epochs:
                 self._configure_fine_tuning()
 
@@ -533,6 +570,7 @@ class Trainer:
             else:
                 epochs_without_improvement += 1
 
+            # Early stopping: se detiene si el F1 de validación deja de mejorar.
             if epochs_without_improvement >= self.config.patience:
                 print('Parada temprana: el F1 macro de validación no mejoró.')
                 break
@@ -617,6 +655,7 @@ class Evaluation:
                 y_pred.extend(logits.argmax(dim=1).cpu().tolist())
                 y_true.extend(labels.tolist())
 
+        # Reporte por raza: precisión, recall y F1 de cada clase.
         print('\nMétricas por raza:\n')
         report = classification_report(
             y_true,
@@ -628,6 +667,7 @@ class Evaluation:
         )
         print(report)
 
+        # Matriz de confusión: filas = raza real, columnas = raza predicha.
         matrix = confusion_matrix(
             y_true,
             y_pred,
@@ -861,15 +901,18 @@ class Inference:
             raise FileNotFoundError(f'No se encontró la imagen: {path}')
 
         with Image.open(path) as image:
+            # unsqueeze(0) crea el lote de una sola imagen: (1, 3, 224, 224).
             tensor = self.transform(image.convert('RGB')).unsqueeze(0)
 
         tensor = tensor.to(self.runtime.device)
 
+        # softmax convierte los logits en probabilidades que suman 1.
         with torch.inference_mode(), self.runtime.autocast():
             probabilities = torch.softmax(self.network(tensor), dim=1)[0]
 
         class_names = self.checkpoint['class_names']
         count = min(top_k, len(class_names))
+        # topk devuelve las k razas más probables, ya ordenadas de mayor a menor.
         scores, indices = probabilities.topk(count)
 
         return [
