@@ -638,4 +638,43 @@ Estas tareas requieren arquitecturas y datasets diferentes al problema inicial d
 
 ---
 
+## 19. Backend y frontend
+
+El entrenamiento vive en `colab/py/red_neuronal_ganado.py` y no depende del backend. La API solo carga el checkpoint ya entrenado.
+
+### API de inferencia
+
+```bash
+uv pip install --python .venv/bin/python -e backend
+.venv/bin/uvicorn cattle_api.main:app --reload --port 8000
+```
+
+Endpoints:
+
+* `GET /health` — estado, dispositivo y clases del checkpoint.
+* `POST /api/v1/predictions` — campo `file` con la imagen (multipart).
+
+Variables de entorno opcionales: `CATTLE_CHECKPOINT` (ruta al `.pth`),
+`CATTLE_DEVICE` (`cuda`/`cpu`), `CATTLE_TOP_K`, `CATTLE_CORS_ORIGINS`,
+`CATTLE_MAX_UPLOAD_BYTES`.
+
+### Interfaz web
+
+```bash
+cd frontend
+bun install   # o npm install
+bun run dev   # http://localhost:3000
+```
+
+`frontend/.env.local` define `NEXT_PUBLIC_API_URL` (por defecto
+`http://localhost:8000`).
+
+### Tests
+
+```bash
+.venv/bin/python -m pytest tests -q
+```
+
+---
+
 Proyecto académico universitario. Uso educativo.

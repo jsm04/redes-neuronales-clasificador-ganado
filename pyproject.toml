@@ -31,6 +31,7 @@ url = "https://download.pytorch.org/whl/cu130"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["backend/src"]
 
 [tool.pyright]
 typeCheckingMode = "standard"
