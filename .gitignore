@@ -51,3 +51,8 @@ config.local.yaml
 # OS
 .DS_Store
 Thumbs.db
+
+# Misc
+
+playground/
+cattle_dataset/

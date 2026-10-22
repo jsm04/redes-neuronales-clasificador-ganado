@@ -16,7 +16,9 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "pyright",
     "pytest>=7.4",
+    "ruff>=0.17.1",
 ]
 
 [tool.uv.sources]
@@ -28,5 +30,25 @@ name = "pytorch"
 url = "https://download.pytorch.org/whl/cu130"
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
 testpaths = ["tests"]
+
+[tool.pyright]
+typeCheckingMode = "standard"
+pythonVersion = "3.12"
+venvPath = "."
+venv = ".venv"
+reportUnknownVariableType = "none"
+reportUnknownMemberType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownParameterType = "none"
+reportArgumentType = "none"
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.format]
+quote-style = "single"
+indent-style = "space"

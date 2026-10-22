@@ -1,0 +1,44 @@
+[
+  {
+    "path": "/home/jsmor/dev/inst/redes-neuronales/data/NN/cattle_dataset/red-dane-cattle/RedDanecattle79_c.jpg",
+    "true": "red-dane-cattle",
+    "predicted": "holstein-friesian-cattle",
+    "confidence": 0.9931640625
+  },
+  {
+    "path": "/home/jsmor/dev/inst/redes-neuronales/data/NN/cattle_dataset/red-dane-cattle/RedDanecattle79.jpg",
+    "true": "red-dane-cattle",
+    "predicted": "holstein-friesian-cattle",
+    "confidence": 0.9931640625
+  },
+  {
+    "path": "/home/jsmor/dev/inst/redes-neuronales/data/NN/cattle_dataset/holstein-friesian-cattle/HolsteinFriesiancattle57.jpg",
+    "true": "holstein-friesian-cattle",
+    "predicted": "ayrshire-cattle",
+    "confidence": 0.43212890625
+  },
+  {
+    "path": "/home/jsmor/dev/inst/redes-neuronales/data/NN/cattle_dataset/jersey-cattle/Jerseycattle125.jpg",
+    "true": "jersey-cattle",
+    "predicted": "brown-swiss-cattle",
+    "confidence": 0.55224609375
+  },
+  {
+    "path": "/home/jsmor/dev/inst/redes-neuronales/data/NN/cattle_dataset/holstein-friesian-cattle/HolsteinFriesiancattle69.jpg",
+    "true": "holstein-friesian-cattle",
+    "predicted": "red-dane-cattle",
+    "confidence": 0.53515625
+  },
+  {
+    "path": "/home/jsmor/dev/inst/redes-neuronales/data/NN/cattle_dataset/jersey-cattle/Jerseycattle0.jpg",
+    "true": "jersey-cattle",
+    "predicted": "red-dane-cattle",
+    "confidence": 0.8583984375
+  },
+  {
+    "path": "/home/jsmor/dev/inst/redes-neuronales/data/NN/cattle_dataset/brown-swiss-cattle/BrownSwisscattle125_c.jpg",
+    "true": "brown-swiss-cattle",
+    "predicted": "ayrshire-cattle",
+    "confidence": 0.396240234375
+  }
+]
