@@ -113,6 +113,14 @@ Respuesta:
 Códigos de error: `400` archivo vacío o imagen ilegible, `413` supera el
 límite de tamaño, `415` el contenido no es una imagen.
 
+Ejemplo puntual:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8000/api/v1/predictions \
+  -F "file=@/home/jsmor/dev/inst/redes-neuronales/data/NN/cattle_dataset/jersey-cattle/Jerseycattle147.jpg;type=image/jpeg" \
+  | jq .
+```
+
 ### Configuración
 
 `backend/src/cattle_api/config.py` resuelve todas las rutas desde la ubicación
