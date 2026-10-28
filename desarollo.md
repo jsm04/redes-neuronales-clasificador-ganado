@@ -19,7 +19,7 @@ propósito:
 El script de `colab/` es la fuente de verdad del modelo y **no debe
 modificarse** para adaptarlo al backend. El backend tiene su propia copia del
 código de inferencia. Si el entrenamiento cambia la arquitectura o el formato
-del checkpoint, hay que actualizar `backend/src/cattle_api/inference.py` de
+del checkpoint, hay que actualizar `backend/src/inference.py` de
 forma coordinada.
 
 ## 2. Estructura
@@ -40,7 +40,7 @@ redes-neuronales/
 │       └── training_history.csv
 ├── backend/
 │   ├── pyproject.toml              # Dependencias de runtime de la API
-│   └── src/cattle_api/
+│   └── src/
 │       ├── config.py               # Rutas, dispositivo, CORS, límites
 │       ├── schemas.py              # Modelos Pydantic de entrada/salida
 │       ├── inference.py            # Carga del checkpoint y predicción
@@ -76,7 +76,7 @@ decimales como lista ordenada de mayor a menor.
 
 ```bash
 uv pip install --python .venv/bin/python -e backend
-.venv/bin/uvicorn cattle_api.main:app --reload --port 8000
+.venv/bin/uvicorn src.main:app --reload --port 8000
 ```
 
 El paquete se instala en modo editable en el entorno existente: no se crea un
@@ -123,8 +123,8 @@ curl -sS -X POST http://127.0.0.1:8000/api/v1/predictions \
 
 ### Configuración
 
-`backend/src/cattle_api/config.py` resuelve todas las rutas desde la ubicación
-del propio archivo (`parents[3]`), nunca desde el directorio de trabajo. Así
+`backend/src/config.py` resuelve todas las rutas desde la ubicación
+del propio archivo (`parents[2]`), nunca desde el directorio de trabajo. Así
 `uvicorn` puede lanzarse desde cualquier carpeta.
 
 | Variable | Por defecto | Uso |

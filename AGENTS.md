@@ -12,7 +12,7 @@ Instructions for agents working in this repository. Full details in
 1. **Never change the logic of `colab/py/red_neuronal_ganado.py`.** It is the
    training source of truth. Comments and docstrings may be improved; code,
    configuration values and behavior must stay untouched. If the backend needs
-   logic from it, copy the minimal code into `backend/src/cattle_api/` and
+   logic from it, copy the minimal code into `backend/src/` and
    leave the original intact.
 2. **Do not reorganize training or move the checkpoint.** It stays at
    `data/NN/cattle_training/best_cattle_breed_model.pth`.
@@ -29,7 +29,7 @@ Instructions for agents working in this repository. Full details in
 | Path | What it is |
 | --- | --- |
 | `colab/py/red_neuronal_ganado.py` | Training and evaluation. Read-only |
-| `backend/src/cattle_api/` | FastAPI: `main.py` (endpoints), `inference.py` (model), `config.py` (paths/env), `schemas.py` |
+| `backend/src/` | FastAPI: `main.py` (endpoints), `inference.py` (model), `config.py` (paths/env), `schemas.py` |
 | `frontend/app`, `frontend/components`, `frontend/lib/api.ts` | Next.js: upload and results |
 | `data/NN/cattle_training/` | Checkpoint and metrics |
 | `desarollo.md` | Detailed explanation and design decisions (Spanish) |
@@ -40,7 +40,7 @@ Instructions for agents working in this repository. Full details in
 ```bash
 # API (reuses the root .venv; do not create another one)
 uv pip install --python .venv/bin/python -e backend
-.venv/bin/uvicorn cattle_api.main:app --reload --port 8000
+.venv/bin/uvicorn src.main:app --reload --port 8000
 
 # Frontend
 cd frontend && bun install && bun run dev

@@ -5,9 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from cattle_api.inference import Inference
-from cattle_api.main import app
 from fastapi.testclient import TestClient
+from src.inference import Inference
+from src.main import app
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CHECKPOINT = (

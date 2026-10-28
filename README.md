@@ -646,7 +646,7 @@ El entrenamiento vive en `colab/py/red_neuronal_ganado.py` y no depende del back
 
 ```bash
 uv pip install --python .venv/bin/python -e backend
-.venv/bin/uvicorn cattle_api.main:app --reload --port 8000
+.venv/bin/uvicorn src.main:app --reload --port 8000
 ```
 
 Endpoints:

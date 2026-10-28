@@ -53,7 +53,7 @@ export default function Home() {
   return (
     <main className="shell">
       <header className="masthead">
-        <p className="eyebrow">Visión por computador</p>
+        <p className="eyebrow">Clasificador de imagenes</p>
         <h1>Identificación de razas bovinas</h1>
         <p className="lede">
           Sube una fotografía y la red estimará la raza del animal con su
